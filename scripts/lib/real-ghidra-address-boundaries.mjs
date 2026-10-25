@@ -82,6 +82,7 @@ export async function verifyGhidraAddressBoundaries(
     await query("read_bytes", { address: entry, length: 1 }),
   );
   if (mutable) await verifyAliasNaming(query, entry, padded);
+  else await verifyNamingRefused(client, query, entry, padded);
   for (const [command, flags, operation] of [
     ["read-bytes", ["--length", "1"], "read_bytes"],
     [
@@ -108,6 +109,31 @@ export async function verifyGhidraAddressBoundaries(
       /cannot be represented without truncation/u,
     );
   }
+}
+
+/** A read-only provider refuses both naming operations and keeps the entry name. */
+async function verifyNamingRefused(client, query, entry, padded) {
+  const originalName = await query("address_name", { address: entry });
+  for (const [name, args] of [
+    ["set_address_name", { address: entry, name: "MUST_NOT_RENAME" }],
+    [
+      "set_addresses_names",
+      { names: { [entry]: "MUST_NOT_RENAME", [padded]: "MUST_NOT_RENAME" } },
+    ],
+  ]) {
+    const reply = await client.callTool(
+      { name, arguments: args },
+      { timeout: 240000 },
+    );
+    assert.equal(reply.isError, true, `${name} was not refused`);
+    const error = requireMcpToolError(reply);
+    assert.equal(error?.code, "capability_unavailable", JSON.stringify(reply));
+  }
+  assert.equal(
+    await query("address_name", { address: entry }),
+    originalName,
+    "A refused naming edit changed the entry name",
+  );
 }
 
 /** Equivalent spellings of one address share or reject one naming edit together. */
