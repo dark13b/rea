@@ -22,6 +22,7 @@ import { homeDirectoryFromEnvironment } from "../config/homeDirectory.js";
 import { basename, dirname } from "node:path";
 import {
   defaultKunaCacheDirectory,
+  nestedLexicalDirectory,
   sameLexicalDirectory,
 } from "../config/kunaCacheDirectory.js";
 import { linuxHopperReleaseCacheDirectory } from "./LinuxHopperCacheDirectory.js";
@@ -1034,10 +1035,11 @@ const purgeSelectedData = async (
 ): Promise<readonly UninstallItem[]> => {
   const items: UninstallItem[] = [];
   const directories: string[] = [];
+  let custom: string | undefined;
   if (platform === "darwin" || platform === "linux") {
     const defaultCache = defaultKunaCacheDirectory(home, environment, platform);
     directories.push(defaultCache);
-    const custom = environment.REA_KUNA_CACHE_DIR;
+    custom = environment.REA_KUNA_CACHE_DIR;
     // Lexical spellings identify the default namespace for reporting.
     // Removal still uses the owned-path checks below. Other selections
     // remain separately reported without resolving symbolic links.
@@ -1053,6 +1055,7 @@ const purgeSelectedData = async (
           `Caller-selected Kuna cache ${custom} was retained because purge does not establish ownership of that entire directory.`,
         ),
       );
+    else custom = undefined;
   }
   if (platform === "linux") {
     const hopper = linuxHopperReleaseCacheDirectory(environment, home);
@@ -1060,19 +1063,34 @@ const purgeSelectedData = async (
     else items.push(item("hopper-releases", "failed", hopper.error.message));
   }
   // Resolve selections before a managed namespace removal can delete cwd.
-  // Keep the existing result and removal order after planning those facts.
-  items.unshift(
-    ...(await purgeManagedData(appendCallerPath(home, ".rea"), fileSystem, [
-      "cache",
-      "state",
-    ])),
-  );
-  for (const directory of directories)
-    items.push(
-      ...(await purgeManagedData(dirname(directory), fileSystem, [
-        basename(directory),
-      ])),
+  // A namespace that contains the caller-selected cache is kept whole, so
+  // the retained report is true.
+  const reaRoot = appendCallerPath(home, ".rea");
+  const purge = (root: string, names: readonly string[]) => {
+    const kept = names.filter(
+      (name) =>
+        custom !== undefined &&
+        nestedLexicalDirectory(custom, appendCallerPath(root, name), platform),
     );
+    const keptItems = kept.map((name) =>
+      item(
+        name,
+        "retained",
+        `${appendCallerPath(root, name)} was retained because it contains the caller-selected Kuna cache ${custom}, which purge does not remove.`,
+      ),
+    );
+    const owned = names.filter((name) => !kept.includes(name));
+    return async () => [
+      ...keptItems,
+      ...(await purgeManagedData(root, fileSystem, owned)),
+    ];
+  };
+  const reaPlan = purge(reaRoot, ["cache", "state"]);
+  const plans = directories.map((directory) =>
+    purge(dirname(directory), [basename(directory)]),
+  );
+  items.unshift(...(await reaPlan()));
+  for (const plan of plans) items.push(...(await plan()));
   return items;
 };
 

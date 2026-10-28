@@ -268,3 +268,47 @@ it("reports a retained Kuna cache reached through symlink parent traversal", asy
     await host.close?.();
   }
 });
+
+it.each([
+  {
+    namespace: "kuna",
+    under: (_home: string, cache: string) => join(cache, "rea", "kuna"),
+  },
+  { namespace: "cache", under: (home: string) => join(home, ".rea", "cache") },
+])(
+  "keeps the $namespace namespace whole when a caller-selected Kuna cache lies inside it",
+  async ({ namespace, under }) => {
+    const home = await createTestTempDirectory("rea-managed-cache-nested-");
+    const cache = join(home, "xdg-cache");
+    const parent = under(home, cache);
+    const custom = join(parent, "selected");
+    await mkdir(custom, { recursive: true });
+    await writeFile(join(custom, "evidence"), "caller evidence");
+    const host = systemUninstallHost(
+      home,
+      undefined,
+      { XDG_CACHE_HOME: cache, REA_KUNA_CACHE_DIR: custom },
+      "linux",
+    );
+    try {
+      expect(await host.purgeData()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            name: "kuna-custom-cache",
+            status: "retained",
+          }),
+          expect.objectContaining({
+            name: namespace,
+            status: "retained",
+            detail: expect.stringContaining(custom),
+          }),
+        ]),
+      );
+      expect(await readFile(join(custom, "evidence"), "utf8")).toBe(
+        "caller evidence",
+      );
+    } finally {
+      await host.close?.();
+    }
+  },
+);
