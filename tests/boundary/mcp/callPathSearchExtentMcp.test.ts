@@ -108,10 +108,13 @@ it.each([
     });
     if (scenario === "different mappings") {
       expect(reply.isError).toBe(true);
-      expect(parseMcpToolError(reply)).toMatchObject({
-        error: { category: "invalid_input" },
+      expect(parseMcpToolError(reply).error).toMatchObject({
+        code: "invalid_request",
+        category: "invalid_input",
+        details: {
+          issues: [{ path: ["functions"], reason: "invalid_value" }],
+        },
       });
-      expect(JSON.stringify(reply)).toContain("coordinate contexts");
       return;
     }
     expect(reply.isError, JSON.stringify(reply)).not.toBe(true);

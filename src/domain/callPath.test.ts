@@ -136,14 +136,24 @@ describe("call path reconstruction", () => {
         expect(() => run(functions)).toThrow(AnalysisInputError);
         expect(() => run(functions)).toThrowError(
           expect.objectContaining({
-            userMessage: expect.stringContaining("coordinate contexts"),
+            issues: [
+              expect.objectContaining({
+                path: ["functions"],
+                reason: "invalid_value",
+              }),
+            ],
           }),
         );
       }
       if (context !== undefined)
         expect(() => run([middle], { start: { address: "0x2000" } })).toThrow(
           expect.objectContaining({
-            userMessage: expect.stringContaining("coordinate contexts"),
+            issues: [
+              expect.objectContaining({
+                path: ["functions"],
+                reason: "invalid_value",
+              }),
+            ],
           }),
         );
     },
