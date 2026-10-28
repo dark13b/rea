@@ -33,8 +33,9 @@ export const sameLexicalDirectory = (
   lexicalDirectory(left, platform) === lexicalDirectory(right, platform);
 
 /**
- * True when `child` lies below `parent` once `.` and `..` are collapsed, so a
- * selection spelled through `..` is judged by where it points, not by prefix.
+ * True when `child` is `parent` or lies below it once `.` and `..` are
+ * collapsed in both, so a selection spelled through `..` is judged by where it
+ * points, not by prefix.
  */
 export const nestedLexicalDirectory = (
   child: string,
@@ -42,10 +43,12 @@ export const nestedLexicalDirectory = (
   platform: NodeJS.Platform,
 ): boolean => {
   const pathApi = platform === "win32" ? win32 : posix;
-  const base = lexicalDirectory(parent, platform);
-  return pathApi
-    .normalize(lexicalDirectory(child, platform))
-    .startsWith(base.endsWith(pathApi.sep) ? base : base + pathApi.sep);
+  const base = pathApi.normalize(lexicalDirectory(parent, platform));
+  const inner = pathApi.normalize(lexicalDirectory(child, platform));
+  return (
+    inner === base ||
+    inner.startsWith(base.endsWith(pathApi.sep) ? base : base + pathApi.sep)
+  );
 };
 
 const lexicalDirectory = (value: string, platform: NodeJS.Platform): string => {

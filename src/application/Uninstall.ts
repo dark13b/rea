@@ -1066,12 +1066,23 @@ const purgeSelectedData = async (
   // A namespace that contains the caller-selected cache is kept whole, so
   // the retained report is true.
   const reaRoot = appendCallerPath(home, ".rea");
-  const purge = (root: string, names: readonly string[]) => {
-    const kept = names.filter(
-      (name) =>
-        custom !== undefined &&
-        nestedLexicalDirectory(custom, appendCallerPath(root, name), platform),
-    );
+  const resolve = async (path: string): Promise<string[]> => [
+    path,
+    ...(await existingRealpath(fileSystem, path)),
+  ];
+  // The selection is also judged where `..` after a symbolic link leads.
+  const selections = custom === undefined ? [] : await resolve(custom);
+  const purge = async (root: string, names: readonly string[]) => {
+    const kept: string[] = [];
+    for (const name of names)
+      for (const target of await resolve(appendCallerPath(root, name)))
+        if (
+          selections.some((selection) =>
+            nestedLexicalDirectory(selection, target, platform),
+          ) &&
+          !kept.includes(name)
+        )
+          kept.push(name);
     const keptItems = kept.map((name) =>
       item(
         name,
@@ -1085,13 +1096,26 @@ const purgeSelectedData = async (
       ...(await purgeManagedData(root, fileSystem, owned)),
     ];
   };
-  const reaPlan = purge(reaRoot, ["cache", "state"]);
-  const plans = directories.map((directory) =>
-    purge(dirname(directory), [basename(directory)]),
-  );
+  const reaPlan = await purge(reaRoot, ["cache", "state"]);
+  const plans: (() => Promise<readonly UninstallItem[]>)[] = [];
+  for (const directory of directories)
+    plans.push(await purge(dirname(directory), [basename(directory)]));
   items.unshift(...(await reaPlan()));
   for (const plan of plans) items.push(...(await plan()));
   return items;
+};
+
+/** Canonical spelling of an existing path, or nothing when it cannot be resolved. */
+const existingRealpath = async (
+  fileSystem: UninstallFileSystem,
+  path: string,
+): Promise<string[]> => {
+  try {
+    const resolved = await fileSystem.realpath?.(path);
+    return resolved === undefined ? [] : [resolved];
+  } catch {
+    return [];
+  }
 };
 
 const purgeManagedData = async (
