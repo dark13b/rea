@@ -715,7 +715,11 @@ const readBody = async (
 };
 
 type ExistingFile =
-  "skip" | "write" | "conflict" | "io" | { readonly error: AnalysisError };
+  | "skip"
+  | "write"
+  | "conflict"
+  | "io"
+  | { readonly error: AnalysisError };
 
 const existingFile = async (
   session: DecompileExport,
