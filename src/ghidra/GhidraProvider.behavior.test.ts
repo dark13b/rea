@@ -723,7 +723,8 @@ describe("Ghidra Windows DOS admission", () => {
       code: "target_format_unsupported",
     });
     const resolved = await windows.resolveAnalysisProfile(target);
-    expect(resolved.ok && resolved.value).toMatchObject({
+    if (!resolved.ok) throw resolved.error;
+    expect(resolved.value).toMatchObject({
       profile: {
         parameters: {
           loader: "MzLoader",
