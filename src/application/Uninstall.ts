@@ -22,8 +22,9 @@ import { homeDirectoryFromEnvironment } from "../config/homeDirectory.js";
 import { basename, dirname } from "node:path";
 import {
   defaultKunaCacheDirectory,
-  nestedLexicalDirectory,
+  hasParentTraversal,
   sameLexicalDirectory,
+  withinLexicalDirectory,
 } from "../config/kunaCacheDirectory.js";
 import { linuxHopperReleaseCacheDirectory } from "./LinuxHopperCacheDirectory.js";
 
@@ -1066,11 +1067,12 @@ const purgeSelectedData = async (
   // A namespace that contains the caller-selected cache is kept whole, so
   // the retained report is true.
   const reaRoot = appendCallerPath(home, ".rea");
+  // A spelling with `..` is judged only where the filesystem resolves it,
+  // because collapsing it lexically is wrong after a symbolic link.
   const resolve = async (path: string): Promise<string[]> => [
-    path,
+    ...(hasParentTraversal(path) ? [] : [path]),
     ...(await existingRealpath(fileSystem, path)),
   ];
-  // The selection is also judged where `..` after a symbolic link leads.
   const selections = custom === undefined ? [] : await resolve(custom);
   const purge = async (root: string, names: readonly string[]) => {
     const kept: string[] = [];
@@ -1078,7 +1080,7 @@ const purgeSelectedData = async (
       for (const target of await resolve(appendCallerPath(root, name)))
         if (
           selections.some((selection) =>
-            nestedLexicalDirectory(selection, target, platform),
+            withinLexicalDirectory(selection, target, platform),
           ) &&
           !kept.includes(name)
         )
