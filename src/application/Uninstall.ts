@@ -1069,30 +1069,47 @@ const purgeSelectedData = async (
   const reaRoot = appendCallerPath(home, ".rea");
   // A spelling with `..` is judged only where the filesystem resolves it,
   // because collapsing it lexically is wrong after a symbolic link.
-  const resolve = async (path: string): Promise<string[]> => [
-    ...(hasParentTraversal(path) ? [] : [path]),
-    ...(await existingRealpath(fileSystem, path)),
-  ];
+  // `undefined` means the location could not be established.
+  const resolve = async (path: string): Promise<string[] | undefined> => {
+    const resolved = await existingRealpath(fileSystem, path);
+    return resolved === undefined
+      ? undefined
+      : [...(hasParentTraversal(path) ? [] : [path]), ...resolved];
+  };
   const selections = custom === undefined ? [] : await resolve(custom);
   const purge = async (root: string, names: readonly string[]) => {
-    const kept: string[] = [];
-    for (const name of names)
-      for (const target of await resolve(appendCallerPath(root, name)))
-        if (
-          selections.some((selection) =>
-            withinLexicalDirectory(selection, target, platform),
-          ) &&
-          !kept.includes(name)
-        )
-          kept.push(name);
-    const keptItems = kept.map((name) =>
+    const kept: { readonly name: string; readonly unknown: boolean }[] = [];
+    for (const name of names) {
+      const targets = await resolve(appendCallerPath(root, name));
+      // An unestablished selection or namespace may contain the selection,
+      // so it is kept rather than treated as absent.
+      const contains =
+        custom !== undefined &&
+        (selections === undefined ||
+          targets === undefined ||
+          targets.some((target) =>
+            selections.some((selection) =>
+              withinLexicalDirectory(selection, target, platform),
+            ),
+          ));
+      if (contains)
+        kept.push({
+          name,
+          unknown: selections === undefined || targets === undefined,
+        });
+    }
+    const keptItems = kept.map(({ name, unknown }) =>
       item(
         name,
         "retained",
-        `${appendCallerPath(root, name)} was retained because it contains the caller-selected Kuna cache ${custom}, which purge does not remove.`,
+        unknown
+          ? `${appendCallerPath(root, name)} was retained because purge could not establish whether it contains the caller-selected Kuna cache ${custom}.`
+          : `${appendCallerPath(root, name)} was retained because it contains the caller-selected Kuna cache ${custom}, which purge does not remove.`,
       ),
     );
-    const owned = names.filter((name) => !kept.includes(name));
+    const owned = names.filter(
+      (name) => !kept.some((entry) => entry.name === name),
+    );
     return async () => [
       ...keptItems,
       ...(await purgeManagedData(root, fileSystem, owned)),
@@ -1107,16 +1124,22 @@ const purgeSelectedData = async (
   return items;
 };
 
-/** Canonical spelling of an existing path, or nothing when it cannot be resolved. */
+/**
+ * Canonical spelling of an existing path, nothing when the path is absent,
+ * or `undefined` when its location cannot be established (for example an
+ * inaccessible parent, or `..` without a realpath to judge it).
+ */
 const existingRealpath = async (
   fileSystem: UninstallFileSystem,
   path: string,
-): Promise<string[]> => {
+): Promise<string[] | undefined> => {
+  if (fileSystem.realpath === undefined)
+    return hasParentTraversal(path) ? undefined : [];
   try {
-    const resolved = await fileSystem.realpath?.(path);
-    return resolved === undefined ? [] : [resolved];
-  } catch {
-    return [];
+    return [await fileSystem.realpath(path)];
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === "ENOENT" || code === "ENOTDIR" ? [] : undefined;
   }
 };
 

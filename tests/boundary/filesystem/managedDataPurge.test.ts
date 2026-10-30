@@ -1,4 +1,11 @@
-import { lstat, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  lstat,
+  mkdir,
+  readFile,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 
@@ -380,6 +387,47 @@ it.for(nestedSelections.filter(({ skip }) => skip !== true))(
       );
       expect(await readFile(evidence, "utf8")).toBe("caller evidence");
     } finally {
+      await host.close?.();
+    }
+  },
+);
+
+it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+  "keeps the namespaces whole when the selection's location cannot be established",
+  async () => {
+    const home = await createTestTempDirectory("rea-managed-cache-unknown-");
+    const outside = join(home, "outside");
+    await mkdir(join(home, ".rea", "state"), { recursive: true });
+    const evidence = await withEvidence(
+      join(home, ".rea", "cache", "selected"),
+    );
+    await mkdir(outside);
+    await symlink(join(home, ".rea", "cache"), join(outside, "alias"), "dir");
+    const unrelated = await withEvidence(join(home, "unrelated"));
+    const host = systemUninstallHost(
+      home,
+      undefined,
+      {
+        XDG_CACHE_HOME: join(home, "xdg-cache"),
+        REA_KUNA_CACHE_DIR: `${outside}/alias/../cache/selected`,
+      },
+      "linux",
+    );
+    await chmod(outside, 0o000);
+    try {
+      expect(await host.purgeData()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            name: "kuna-custom-cache",
+            status: "retained",
+          }),
+          expect.objectContaining({ name: "cache", status: "retained" }),
+        ]),
+      );
+      expect(await readFile(evidence, "utf8")).toBe("caller evidence");
+      expect(await readFile(unrelated, "utf8")).toBe("caller evidence");
+    } finally {
+      await chmod(outside, 0o755);
       await host.close?.();
     }
   },
